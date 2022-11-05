@@ -6,7 +6,7 @@ authors = ["Qore Technologies, s.r.o. <info@qoretechnologies.com>"]
 readme = "README.md"
 license = "MIT"
 homepage = "https://qoretechnologies.com/"
-repository = "https://git.qoretechnologies.com/qorus/qorus-docker"
+repository = "https://github.com/qoretechnologies/qorus-remote"
 #documentation = ""
 keywords = ["qorus"]
 classifiers = [
@@ -29,7 +29,7 @@ include = [
 
 
 [tool.poetry.urls]
-"Bug Tracker" = "https://git.qoretechnologies.com/qorus/qorus-docker/-/issues"
+"Bug Tracker" = "https://github.com/qoretechnologies/qorus-remote/issues"
 
 
 [tool.poetry.scripts]
