@@ -1,0 +1,54 @@
+[tool.poetry]
+name = "qorus-remote"
+version = "1.0.0"
+description = "A package with scripts for use with remote Qorus instances"
+authors = ["Qore Technologies, s.r.o. <info@qoretechnologies.com>"]
+readme = "README.md"
+license = "MIT"
+homepage = "https://qoretechnologies.com/"
+repository = "https://git.qoretechnologies.com/qorus/qorus-docker"
+#documentation = ""
+keywords = ["qorus"]
+classifiers = [
+    "Topic :: Software Development",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+    "Environment :: Web Environment",
+    "Environment :: Console",
+    "Operating System :: POSIX",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS :: MacOS X",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators"
+]
+
+include = [
+    "qorus_remote/tools/templates/install.sh",
+    { path = "example.netrc", format = "sdist" } ]
+
+
+[tool.poetry.urls]
+"Bug Tracker" = "https://git.qoretechnologies.com/qorus/qorus-docker/-/issues"
+
+
+[tool.poetry.scripts]
+qorus-remote-commands = "qorus_remote.tools.qorus_remote_commands:main"
+make-release = "qorus_remote.tools.make_release:main"
+
+
+[tool.poetry.dependencies]
+python = "^3.8"
+pyaml = "*"
+requests = "*"
+urllib3 = "*"
+websocket-client = "*"
+
+
+[tool.poetry.dev-dependencies]
+
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
