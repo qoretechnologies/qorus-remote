@@ -698,7 +698,7 @@ class MakeRelease:
                 if self._opts.full:
                     opts += " -F"
 
-                makeRelease.doCmd("sh ./install.sh" + opts)
+                MakeRelease.doCmd("sh ./install.sh" + opts)
 
             os.chdir(self._cwd)
             print("done!")
