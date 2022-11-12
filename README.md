@@ -28,16 +28,16 @@ Install via pip:
 
 ## Concrete Usage Examples
 
-`qorus-remote-commands ~/.netrc-qorus-1 qctl ps`
+`qorus-remote-commands ~/.netrc-qorus-local qctl ps`
 
-`qorus-remote-commands ~/.netrc-qorus-1 qctl threads qorus-core`
+`qorus-remote-commands ~/.netrc-qorus-local qctl threads qorus-core`
 
-`qorus-remote-commands ~/.netrc-qorus-1 qrest system/starttime`
+`qorus-remote-commands ~/.netrc-qorus-local qrest system/starttime`
 
 ## .netrc file
 | Variable | Description | Mandatory |
 | --- | --- | --- |
-| `machine` | ip adress of the Qorus server machine | Yes |
+| `machine` | ip address of the Qorus server machine | Yes |
 | `port` | port of the Qorus server machine | Yes |
 | `secure` | `yes` if the Qorus server is on `https`, no otherwise | Yes |
 | `login` | Qorus username | Yes |
@@ -47,7 +47,7 @@ Install via pip:
 | `nodelete` | Does not delete the upload folder on the server | No |
 
 ### Example .netrc file
-For a Qorus server located on https://localhost:8011 and using the adm Qorus user:
+For a Qorus server located on https://localhost:8011 and using the Qorus user `adm` (`.netrc-qorus-local`):
 ```
 machine localhost
 port 8011
@@ -58,7 +58,9 @@ timeout 120
 verbose no
 ```
 
-## Qorus commands
+## Commands
+
+### Qorus commands
 `oload`\
 `ocmd`\
 `ojview`\
@@ -73,7 +75,7 @@ verbose no
 `schema-tool`\
 `user-tool`
 
-## Qore commands
+### Qore commands
 `rest`\
 `schema-reverse`\
 `sfrest`\
@@ -81,6 +83,14 @@ verbose no
 `sqlutil`\
 `qdp`\
 `saprest`
+
+### Aliases
+
+It's recommended to create aliases for each of the above commands like:
+- Unix/Linux: `alias oload='qorus-remote-commands ~/.netrc-qorus-local oload $*'`
+- Windows: `DOSKEY oload=qorus-remote-commands %USERPROFILE%\Qorus\netrc-qorus-local oload $*`
+
+etc
 
 # make-release
 
