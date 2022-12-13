@@ -82,6 +82,14 @@ class MakeRelease:
     # main release dir
     release_dir: str = "make-release-{}-{}-pid-{}".format(socket.gethostname(), getpass.getuser(), os.getpid())
 
+    # service resource types
+    YamlServiceResources: tuple = [
+        "resource",
+        "text-resource",
+        "bin-resource",
+        "template",
+    ]
+
     @staticmethod
     def getLabel(prefix: str, label: str) -> str:
         # check for file name instead of label
@@ -149,9 +157,9 @@ class MakeRelease:
             return False
 
     def __init__(self):
-        self._ulist = []
-        self._rname = ''
-        self._tar = ''
+        self._ulist: list = []
+        self._rname: str = ''
+        self._tar: str = ''
 
         # set release dir
         self._rdir = os.getenv('QORUS_RELEASE_DIR')
@@ -215,6 +223,8 @@ class MakeRelease:
         if not self._opts.usrc and (self._opts.pref or self._opts.padd):
             self._opts.usrc = "."
 
+        self._opts.usrc = os.path.abspath(self._opts.usrc)
+
         # fix prefix
         if self._opts.pref:
             self._opts.pref = self.fixPrefix(self._opts.pref)
@@ -276,7 +286,7 @@ class MakeRelease:
 
     def checkFiles(self, args):
         # make file lists
-        self._ulist = []
+        self._ulist: list = []
 
         cwd = os.getcwd()
         os.chdir(self._opts.usrc)
@@ -298,16 +308,18 @@ class MakeRelease:
         finally:
             os.chdir(cwd)
 
-    def makeList(self, file_list, resource_list):
+    def makeList(self, file_list: list, resource_list: list) -> list:
         # make a set of the file list for quick lookups
-        file_map = {i: True for i in file_list}
+        file_map: dict = {i: True for i in file_list}
 
-        madeList = []
+        madeList: list = []
+        entry: str
         for entry in file_list:
             if re.search('~$', entry):
                 continue
 
             if re.search('[*?]', entry):
+                e: str
                 for e in glob.glob(entry):
                     self.processFile(e, file_map, madeList, resource_list)
             else:
@@ -315,7 +327,24 @@ class MakeRelease:
 
         return madeList
 
-    def processFile(self, entry, file_map, madeList, resource_list):
+    def processResource(self, entry: str, resource_list: list, resource_name: str):
+        self.checkAbsolutePath(resource_name)
+        d: str = os.path.dirname(entry)
+        resource_path: str = os.path.join(d, resource_name)
+
+        if not re.search('[*?]', resource_name):
+            if not MakeRelease.is_readable(resource_path):
+                MakeRelease.error("service {} references resource {} that does not exist ({})".format(entry,
+                    resource_name, re.error))
+        elif not glob.glob(resource_path):
+            MakeRelease.error("service {} references resource glob {} that does not match any files".format(
+                entry, resource_name))
+        resource_list.append({
+            'source': resource_path,
+            'target': resource_name,
+        })
+
+    def processFile(self, entry: str, file_map: dict, madeList: list, resource_list: list):
         madeList.append(entry)
 
         if re.search('\\.yaml$', entry):
@@ -329,13 +358,39 @@ class MakeRelease:
                         if MakeRelease.is_readable(src) and src not in file_map:
                             file_map[src] = True
                             madeList.append(src)
+
+                    am = None
+                    if 'api-manager' in fh \
+                        and 'provider-options' in fh['api-manager'] \
+                        and 'schema' in fh['api-manager']['provider-options'] \
+                        and 'value' in fh['api-manager']['provider-options']['schema']:
+                        am = fh['api-manager']['provider-options']['schema']['value']
+
+                    print('am: {}'.format(am))
+
+                    # process resources from Qorus services
+                    if re.search('\\.qsd\\.yaml$', entry):
+                        resource_type: str
+                        for resource_type in MakeRelease.YamlServiceResources:
+                            resource_name: str
+                            if fh.get(resource_type, None):
+                                for resource_name in fh[resource_type]:
+                                    self.processResource(entry, resource_list, resource_name)
+
+                        # add API management resources
+                        if 'api-manager' in fh \
+                            and 'provider-options' in fh['api-manager'] \
+                            and 'schema' in fh['api-manager']['provider-options'] \
+                            and 'value' in fh['api-manager']['provider-options']['schema']:
+                            self.processResource(entry, resource_list,
+                                fh['api-manager']['provider-options']['schema']['value'])
+
             except Exception as e:
                 print(e)
                 pass
 
-        # add service resources to released
+        # add service resources to released from old-style service files
         if resource_list and re.search('\\.qsd$', entry):
-            rlist = []
             with open(entry) as e:
                 lines = e.readLines()
 
@@ -344,16 +399,7 @@ class MakeRelease:
 
                 if resource_name:
                     resource_name = resource_name.strip()
-                    self.checkAbsolutePath(resource_name)
-                    d = os.path.dirname(entry)
-                    if d != ".":
-                        resource_name = os.path.join(d, resource_name)
-                    if not re.search('[*?]', resource_name) and not MakeRelease.is_readable(resource_name):
-                        MakeRelease.error("service {} references resource {} that does not exist ({})".format(entry, resource_name, re.error))
-                    rlist += resource_name
-
-            for r in rlist:
-                resource_list.append(('source', r))
+                    self.processResource(entry, resource_list, resource_name)
 
     def delTree(self, targ):
         shutil.rmtree(targ, onerror=readonly_rmtree_handler)
@@ -368,7 +414,7 @@ class MakeRelease:
         shutil.rmtree(path, False)
         time.sleep(1)
 
-    def doCreateTar(self, opt, tarf, files, exclude=False):
+    def doCreateTar(self, opt: str, tarf: str, files: list, exclude: bool = False):
         with tarfile.open(tarf, 'w:{}'.format(opt)) as tar:
             for f in files:
                 if exclude:
@@ -392,14 +438,15 @@ class MakeRelease:
         if self._opts.verbose:
             print(*args, **kwargs)
 
-    def doResources(self, resource_list, dir_name):
-        dh = {}
+    def doResources(self, resource_list: list, dir_name: str):
+        dh: dict = {}
+        rh: dict
         for rh in resource_list:
-            d = os.path.dirname(rh['source'])
-            fn = os.path.basename(rh['source'])
+            d: str = os.path.dirname(rh['source'])
+            fn: str = os.path.basename(rh['source'])
 
-            # tdir = normalize_dir(dir_name if d == "." else os.path.join(dir_name, d))
-            tdir = os.path.normpath(dir_name if d == "." else os.path.join(dir_name, d))
+            trdir: str = os.path.dirname(rh['target'])
+            tdir: str = os.path.normpath(dir_name if trdir == '.' else os.path.join(dir_name, trdir))
             if tdir not in dh:
                 if not os.path.isdir(tdir):
                     MakeRelease.mkdir(tdir)
@@ -408,31 +455,32 @@ class MakeRelease:
 
             # include all files in the subdirectory matching the pattern
             if re.search('[*?]', fn):
-                dc = os.path.dirname(fn)
+                dc: str = os.path.dirname(fn)
                 if dc != ".":
                     fn = os.path.basename(fn)
                     d += os.path.sep + dc
 
                 self.doGlob(d, fn, tdir)
             else:
-                self.copyFiles([rh.source], tdir + os.path.sep)
+                self.copyFiles([rh['source']], tdir + os.path.sep)
 
-    def doGlob(self, d, fn, tdir):
+    def doGlob(self, d: str, fn: str, tdir: str):
+        fstr: str
         for fstr in glob.glob(os.path.join(d, fn)):
             # skip files ending in "~" as backup files
             if re.search('~$', fstr):
                 continue
 
             if os.path.isdir(fstr):
-                self.doGlob(d, os.path.join(fstr.substr(d.size() + 1), os.path.basename(fn)), tdir)
+                self.doGlob(d, os.path.join(fstr[len(d):], os.path.basename(fn)), tdir)
                 continue
 
             # skip special files, sockets, device files, etc
             if not os.path.isfile(fstr):
                 continue
 
-            targ = tdir + os.path.sep
-            dir_name = os.path.dirname(fn)
+            targ: str = tdir + os.path.sep
+            dir_name: str = os.path.dirname(fn)
             if dir_name != ".":
                 targ += dir_name + os.path.sep
                 if not os.path.isdir(targ):
@@ -440,16 +488,20 @@ class MakeRelease:
 
             self.copyFiles([fstr], targ)
 
-    def createUserReleaseFile(self, path):
+    def createUserReleaseFile(self, path: str, load_list: list = []):
         # create release file
         with open(path, 'w') as f:
-            f.write("# automatically generated by {} on {} ({}@{})\n".format(os.path.basename(__file__), datetime.datetime.now(), os.getenv('USER'), socket.gethostname()))
+            f.write("# automatically generated by {} on {} ({}@{})\n".format(os.path.basename(__file__),
+                datetime.datetime.now(), os.getenv('USER'), socket.gethostname()))
 
-            root_dir = os.path.dirname(path)
+            root_dir: str = os.path.dirname(path)
             if root_dir == ".":
                 root_dir = ""
 
-            for fn in self._ulist:
+            fn: str
+            if not load_list:
+                load_list = self._ulist
+            for fn in load_list:
                 # check for known file extensions
                 ext = MakeRelease.getExt(fn)
                 if not ext:
@@ -457,7 +509,7 @@ class MakeRelease:
                     if not os.access(fn, os.X_OK):
                         print("warning: no extension in file '{}'...".format(fn))
                 elif ext in LoadFileTypes:
-                    load_file_path = self.getLoadPath(fn, root_dir)
+                    load_file_path: str = self.getLoadPath(fn, root_dir)
                     if platform.system() == 'Windows':
                         load_file_path = load_file_path.replace('\\', '/')
                     # f.write("load {}\n".format(self.getLoadPath(fn, root_dir)))
@@ -471,7 +523,7 @@ class MakeRelease:
                 ext = MakeRelease.getExt(fn)
 
                 if not re.search('sql$', ext):
-                    print("warning: user SQL file extension is not 'sql': {}".format(fn))
+                   print("warning: user SQL file extension is not 'sql': {}".format(fn))
 
                 f.write("omquser-exec-sql {}\n".format(self.getLoadPath(fn, root_dir)))
 
@@ -483,9 +535,11 @@ class MakeRelease:
         os.chmod(path, 0o644)
         print("created user release file {}".format(path))
 
-    def getLoadPath(self, fn, root_dir):
+    def getLoadPath(self, fn: str, root_dir: str) -> str:
+        #print('getLoadPath() fn: {} root_dir: {} (pref: {} padd: {})'.format(fn, root_dir, self._opts.pref, self._opts.padd))
+
         if fn.startswith(root_dir):
-            fn = fn[root_dir.size():]
+            fn = fn[len(root_dir):]
         if self._opts.pref:
             return os.path.join(self._opts.pref, fn)
         if self._opts.padd:
@@ -546,20 +600,25 @@ class MakeRelease:
                 MakeRelease.error("MakeRelease.mkdir({}) failed: {}".format(os.path.join(rname, "releases"), os.strerror(0)))
 
         if self._ulist:
-            tar_file_name = "{}.tar.gz".format(ulabel)
-            user_file_list = self._ulist
+            tar_file_name: str = "{}.tar.gz".format(ulabel)
+            user_file_list: list = self._ulist
             if self._opts.usql:
                 user_file_list += self._opts.usql
 
             # path -> info
-            resource_list = []
+            resource_list: list = []
 
             os.chdir(self._opts.usrc)
 
-            file_list = self.makeList(user_file_list, resource_list)
+            file_list: list = self.makeList(user_file_list, resource_list)
+
+            # get base dir for files
+            base_dir: str = os.path.dirname(user_file_list[0])
 
             if not self._opts.pref and not self._opts.padd and resource_list:
                 self._opts.padd = "user"
+
+            load_list: list
 
             # create release in prefix directory
             to_delete = ''
@@ -570,11 +629,11 @@ class MakeRelease:
                     if platform.system() == 'Windows':
                         pdir = pdir.replace('/', '\\')
 
-                    path_component_list = pdir.split(os.path.sep)
+                    path_component_list: list = pdir.split(os.path.sep)
 
                     # get unique directory prefix name
                     unique_dir = MakeRelease.release_dir
-                    dir_name = os.path.join(os.path.join(self.gettempdir(), unique_dir), pdir)
+                    dir_name: str = os.path.join(os.path.join(self.gettempdir(), unique_dir), pdir)
 
                     # create install directory
                     MakeRelease.mkdir(dir_name, mode=0o755)
@@ -582,7 +641,16 @@ class MakeRelease:
                     to_delete = os.path.join(self.gettempdir(), unique_dir)
 
                     # copy files to temporary release directory
-                    self.copyFiles(file_list, dir_name)
+                    fn: str
+                    for fn in file_list:
+                        file_base_dir: str = os.path.dirname(fn)
+                        targ_dir: str = dir_name
+                        if base_dir != file_base_dir and file_base_dir[0:len(base_dir) - 1] == base_dir:
+                            targ_dir = os.path.join(dir_name, file_base_dir[len(base_dir) + 1:]) + os.sep
+                            MakeRelease.mkdir(targ_dir)
+                        self.copyFiles([fn], targ_dir)
+
+                    load_list = [os.path.basename(e) for e in user_file_list]
                     self.doResources(resource_list, dir_name)
 
                     # create tar file
@@ -606,7 +674,7 @@ class MakeRelease:
                     path_component_list = pdir.split(os.path.sep)
 
                     # create install directory
-                    dir_name = os.path.join(os.path.join(self.gettempdir(), unique_dir), pdir)
+                    dir_name: str = os.path.join(os.path.join(self.gettempdir(), unique_dir), pdir)
                     MakeRelease.mkdir(dir_name)
 
                     self.logDebug('creating install dir: {}'.format(dir_name))
@@ -614,6 +682,7 @@ class MakeRelease:
                     to_delete = os.path.join(self.gettempdir(), unique_dir)
                     # to_delete = dir_name
 
+                    load_list = [pdir + '/' + os.path.basename(e) for e in user_file_list]
                     self.doResources(resource_list, dir_name)
 
                     # copy files to temporary release directory
@@ -657,6 +726,7 @@ class MakeRelease:
                         # self.deleteFolder(to_delete)
             else:
                 self.doCreateTar("gz", os.path.join(rname, tar_file_name), file_list)
+                load_list = user_file_list
 
             print("created user tar file {}/{}".format(rname, tar_file_name))
 
@@ -678,7 +748,7 @@ class MakeRelease:
 
             # create release file
             release_file_namef = "{}/releases/{}.qrf".format(rname, ulabel)
-            self.createUserReleaseFile(release_file_namef)
+            self.createUserReleaseFile(release_file_namef, load_list)
 
             if self._opts.comp:
                 # save current working directory
