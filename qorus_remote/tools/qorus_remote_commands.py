@@ -247,15 +247,23 @@ def oload_remove_files(ofiles):
         remote_print_exception(e)
 
 
-def oload_add_src_files(ofiles):
+def oload_add_src_files(ofiles: set, filemap: dict) -> list:
     try:
-        sfiles = []
+        sfiles: list = []
+        ofile: str
         for ofile in ofiles:
+            done: bool = False
             if ofile[-5:] == '.yaml' or ofile[-4:] == '.yml':
                 with open(ofile) as of:
                     doc = yaml.full_load(of)
                     if doc.get('code'):
-                        sfiles.append(os.path.join(os.path.dirname(ofile), doc.get('code')))
+                        path: str = os.path.join(os.path.dirname(ofile), doc.get('code'))
+                        sfiles.append(path)
+                        filemap[path] = doc.get('code')
+                        done = True
+
+            if not done:
+                filemap[ofile] = os.path.basename(ofile)
 
         return sfiles
     except Exception as e:
@@ -263,32 +271,44 @@ def oload_add_src_files(ofiles):
         remote_print_exception(e)
 
 # recursively process resource files/directories
-def oload_process_resource_path(rfiles, path):
+def oload_process_resource_path(rfiles: list, path: str, root: str, filemap: dict):
     if '*' in path:
+        g: str
         for g in glob.glob(path):
-            oload_process_resource_path(rfiles, g)
+            oload_process_resource_path(rfiles, g, root, filemap)
     else:
         if os.path.isdir(path):
-            oload_process_resource_path(rfiles, path + '/*')
+            oload_process_resource_path(rfiles, path + '/*', root, filemap)
         else:
             rfiles.append(path)
+            filemap[path] = os.path.relpath(path, root)
 
-def oload_add_resource_files(ofiles):
+def oload_add_resource_files(ofiles: set, filemap: dict) -> list:
     try:
-        rfiles = []
+        rfiles: list = []
+        ofile: str
         for ofile in ofiles:
             if ofile[-5:] == '.yaml' or ofile[-4:] == '.yml':
                 with open(ofile) as of:
                     doc = yaml.full_load(of)
                     for r in doc.get('resource', []):
-                        path = os.path.join(os.path.dirname(ofile), r)
-                        oload_process_resource_path(rfiles, path)
+                        root: str = os.path.dirname(ofile)
+                        path = os.path.join(root, r)
+                        oload_process_resource_path(rfiles, path, root, filemap)
+                    # add API management resources
+                    if 'api-manager' in doc \
+                        and 'provider-options' in doc['api-manager'] \
+                        and 'schema' in doc['api-manager']['provider-options'] \
+                        and 'value' in doc['api-manager']['provider-options']['schema']:
+                        schema_file: str = doc['api-manager']['provider-options']['schema']['value']
+                        path = os.path.join(os.path.dirname(ofile), schema_file)
+                        rfiles.append(path)
+                        filemap[path] = schema_file
 
         return rfiles
     except Exception as e:
         print('Exception when checking files for resource')
         remote_print_exception(e)
-
 
 def oload_add_qrf_files(ofiles):
     try:
@@ -305,44 +325,49 @@ def oload_add_qrf_files(ofiles):
         print('Exception when checking qrf files')
         remote_print_exception(e)
 
+# ofiles: original file list to process
+# filemap: map of file names to relative target names
+def oload_add_files(ofiles: set, filemap: dict) -> set:
+    todo: set = ofiles.copy()
+    toUpload: set = ofiles
 
-def oload_add_files(ofiles):
-    todo = ofiles.copy()
-    toUpload = ofiles
+    tmp = set()
 
-    while todo:
-        tmp = set()
+    remote_print('Checking for yaml files and add their source files if they are missing')
+    tmp.update(oload_add_src_files(todo, filemap))
 
-        remote_print('Checking for yaml files and add their source files if they are missing')
-        tmp.update(oload_add_src_files(todo))
+    remote_print('Checking service files for resource')
+    tmp.update(oload_add_resource_files(todo, filemap))
 
-        remote_print('Checking service files for resource')
-        tmp.update(oload_add_resource_files(todo))
+    remote_print('Checking qrf files for files to load')
+    tmp.update(oload_add_qrf_files(todo))
 
-        remote_print('Checking qrf files for files to load')
-        tmp.update(oload_add_qrf_files(todo))
-
-        todo = tmp.copy()
-        toUpload.update(tmp)
+    toUpload.update(tmp)
 
     return toUpload
 
 
-def oload_upload_files(files, directory=''):
+def oload_upload_files(files: set, filemap: dict, directory: str = '') -> str:
     if not files:
         return directory
 
     try:
-        url = '{}raw/remote-file'.format(globals['URL'].replace('wss', 'https').replace('ws', 'http'))
+        url: str = '{}raw/remote-file'.format(globals['URL'].replace('wss', 'https').replace('ws', 'http'))
 
         print('Uploading files to remote host \"{}\": '.format(globals['URL']), end='')
+        if globals.get('verbose', '') == "yes":
+            print()
+
+        ofile: str
         for ofile in files:
+            filename: str = filemap.get(ofile, os.path.basename(ofile))
+
             if not directory:
                 d: str = os.path.dirname(ofile)
-                filename: str = os.path.basename(ofile)
-                headers = {'Content-Type': 'application/octet-stream', 'filepath': filename}
+                headers: dict = {'Content-Type': 'application/octet-stream', 'filepath': filename}
                 with open(ofile,'rb') as data:
-                    res = requests.post(url, data=data, headers=headers, verify=False, auth=requests.auth.HTTPBasicAuth(globals['login'], globals['password']))
+                    res = requests.post(url, data=data, headers=headers, verify=False,
+                        auth=requests.auth.HTTPBasicAuth(globals['login'], globals['password']))
                     if '<html><head><title>' in res.text:
                         print(res.text)
                         sys.exit(1)
@@ -350,17 +375,21 @@ def oload_upload_files(files, directory=''):
                         directory = res.text
                         remote_print('\nUploading into {} directory'.format(directory))
             else:
-                headers = {'Content-Type': 'application/octet-stream', 'filepath': ofile, 'dir': directory}
+                headers: dict = {'Content-Type': 'application/octet-stream', 'filepath': filename, 'dir': directory}
                 with open(ofile,'rb') as data:
-                    res = requests.post(url, data=data, headers=headers, verify=False, auth=requests.auth.HTTPBasicAuth(globals['login'], globals['password']))
+                    res = requests.post(url, data=data, headers=headers, verify=False,
+                        auth=requests.auth.HTTPBasicAuth(globals['login'], globals['password']))
                     if '<html><head><title>' in res.text:
                         print(res.text)
                         sys.exit(1)
 
-            print('.', end='', flush=True)
-            remote_print('Uploaded {}'.format(ofile))
+            if globals.get('verbose', '') == "yes":
+                remote_print('Uploaded {} -> {}'.format(ofile, filename))
+            else:
+                print('.', end='', flush=True)
 
-        print()
+        if not globals.get('verbose', '') == "yes":
+            print()
         return directory
     except Exception as e:
         print('\nException when uploading files')
@@ -390,8 +419,10 @@ def oload_handle(args):
     remote_print('Removing non-existing files from the file list')
     oload_remove_files(ofiles)
 
-    toUpload = oload_add_files(set(ofiles))
-    directory = oload_upload_files(toUpload)
+    # filemap: map of local paths to relative target paths
+    filemap: dict = dict()
+    toUpload: set = oload_add_files(set(ofiles), filemap)
+    directory: str = oload_upload_files(toUpload, filemap)
 
     if globals['cmd']['cmd'] == 'oload':
         ofiles = oload_remove_dir_from_files(ofiles)
