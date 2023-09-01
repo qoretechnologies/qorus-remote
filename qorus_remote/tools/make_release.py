@@ -366,7 +366,7 @@ class MakeRelease:
                         and 'value' in fh['api-manager']['provider-options']['schema']:
                         am = fh['api-manager']['provider-options']['schema']['value']
 
-                    print('am: {}'.format(am))
+                    #print('am: {}'.format(am))
 
                     # process resources from Qorus services
                     if re.search('\\.qsd\\.yaml$', entry):

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "qorus-remote"
-version = "1.0.4"
+version = "1.0.5"
 description = "A package with scripts for use with remote Qorus instances"
 authors = ["Qore Technologies, s.r.o. <info@qoretechnologies.com>"]
 readme = "README.md"
